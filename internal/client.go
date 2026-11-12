@@ -1796,10 +1796,21 @@ func NewServiceClient(workflowServiceClient workflowservice.WorkflowServiceClien
 		outboundPayloadVisitor: client.newOutboundPayloadVisitor(),
 	}
 	for i := len(options.Interceptors) - 1; i >= 0; i-- {
-		client.interceptor = options.Interceptors[i].InterceptClient(client.interceptor)
+		if nsInterceptor, ok := options.Interceptors[i].(namespaceAwareClientInterceptor); ok {
+			client.interceptor = nsInterceptor.InterceptClientWithNamespace(client.interceptor, client.namespace)
+		} else {
+			client.interceptor = options.Interceptors[i].InterceptClient(client.interceptor)
+		}
 	}
 
 	return client
+}
+
+// namespaceAwareClientInterceptor is implemented by SDK client interceptors,
+// such as the tracing interceptors, that need the client's namespace. When
+// implemented, it is called instead of InterceptClient.
+type namespaceAwareClientInterceptor interface {
+	InterceptClientWithNamespace(next ClientOutboundInterceptor, namespace string) ClientOutboundInterceptor
 }
 
 func (op *withStartWorkflowOperationImpl) Get(ctx context.Context) (WorkflowRun, error) {

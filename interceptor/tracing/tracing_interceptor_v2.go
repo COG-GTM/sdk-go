@@ -26,6 +26,7 @@ const (
 	nexusServiceTagKey    = "temporalNexusService"
 	nexusOperationTagKey  = "temporalNexusOperation"
 	nexusEndpointTagKey   = "temporalNexusEndpoint"
+	namespaceTagKey       = "temporalNamespace"
 )
 
 // tracerCommon contains context-independent tracing operations.
@@ -196,7 +197,16 @@ type tracingClientInterceptor struct {
 func (t *tracingClientInterceptor) InterceptClient(
 	next interceptor.ClientOutboundInterceptor,
 ) interceptor.ClientOutboundInterceptor {
-	i := &tracingClientOutboundInterceptor{root: t.root}
+	return t.InterceptClientWithNamespace(next, "")
+}
+
+// InterceptClientWithNamespace is used by the SDK instead of InterceptClient so
+// client spans can be tagged with the client's namespace.
+func (t *tracingClientInterceptor) InterceptClientWithNamespace(
+	next interceptor.ClientOutboundInterceptor,
+	namespace string,
+) interceptor.ClientOutboundInterceptor {
+	i := &tracingClientOutboundInterceptor{root: t.root, namespace: namespace}
 	i.Next = next
 	return i
 }
@@ -235,13 +245,19 @@ func (t *tracingWorkerInterceptor) InterceptNexusOperation(
 
 type tracingClientOutboundInterceptor struct {
 	interceptor.ClientOutboundInterceptorBase
-	root *tracingInterceptor
+	root      *tracingInterceptor
+	namespace string
+}
+
+func (t *tracingClientOutboundInterceptor) tags(tags map[string]string) map[string]string {
+	return withNamespaceTag(tags, t.namespace)
 }
 
 func (t *tracingClientOutboundInterceptor) CreateSchedule(ctx context.Context, in *interceptor.ScheduleClientCreateInput) (run client.ScheduleHandle, err error) {
 	ctx, endSpan, err := startOutboundSpan(t.root.tracer, ctx, &TracerStartSpanOptions{
 		Operation: "CreateSchedule",
 		Name:      in.Options.ID,
+		Tags:      t.tags(nil),
 	}, t.root.headerWriter(t.root.tracer, ctx))
 	if err != nil {
 		return nil, err
@@ -258,7 +274,7 @@ func (t *tracingClientOutboundInterceptor) ExecuteWorkflow(
 	ctx, endSpan, err := startOutboundSpan(t.root.tracer, ctx, &TracerStartSpanOptions{
 		Operation: "StartWorkflow",
 		Name:      in.WorkflowType,
-		Tags:      map[string]string{workflowIDTagKey: in.Options.ID},
+		Tags:      t.tags(map[string]string{workflowIDTagKey: in.Options.ID}),
 	}, t.root.headerWriter(t.root.tracer, ctx))
 	if err != nil {
 		return nil, err
@@ -272,7 +288,7 @@ func (t *tracingClientOutboundInterceptor) SignalWorkflow(ctx context.Context, i
 	ctx, endSpan, err := startOutboundSpan(t.root.tracer, ctx, &TracerStartSpanOptions{
 		Operation: "SignalWorkflow",
 		Name:      in.SignalName,
-		Tags:      map[string]string{workflowIDTagKey: in.WorkflowID},
+		Tags:      t.tags(map[string]string{workflowIDTagKey: in.WorkflowID}),
 	}, t.root.headerWriter(t.root.tracer, ctx))
 	if err != nil {
 		return err
@@ -289,7 +305,7 @@ func (t *tracingClientOutboundInterceptor) SignalWithStartWorkflow(
 	ctx, endSpan, err := startOutboundSpan(t.root.tracer, ctx, &TracerStartSpanOptions{
 		Operation: "SignalWithStartWorkflow",
 		Name:      in.WorkflowType,
-		Tags:      map[string]string{workflowIDTagKey: in.Options.ID},
+		Tags:      t.tags(map[string]string{workflowIDTagKey: in.Options.ID}),
 	}, t.root.headerWriter(t.root.tracer, ctx))
 	if err != nil {
 		return nil, err
@@ -306,7 +322,7 @@ func (t *tracingClientOutboundInterceptor) QueryWorkflow(
 	ctx, endSpan, err := startOutboundSpan(t.root.tracer, ctx, &TracerStartSpanOptions{
 		Operation: "QueryWorkflow",
 		Name:      in.QueryType,
-		Tags:      map[string]string{workflowIDTagKey: in.WorkflowID},
+		Tags:      t.tags(map[string]string{workflowIDTagKey: in.WorkflowID}),
 	}, t.root.headerWriter(t.root.tracer, ctx))
 	if err != nil {
 		return nil, err
@@ -323,10 +339,10 @@ func (t *tracingClientOutboundInterceptor) UpdateWorkflow(
 	ctx, endSpan, err := startOutboundSpan(t.root.tracer, ctx, &TracerStartSpanOptions{
 		Operation: "StartWorkflowUpdate",
 		Name:      in.UpdateName,
-		Tags: map[string]string{
+		Tags: t.tags(map[string]string{
 			workflowIDTagKey: in.WorkflowID,
 			updateIDTagKey:   in.UpdateID,
-		},
+		}),
 	}, t.root.headerWriter(t.root.tracer, ctx))
 	if err != nil {
 		return nil, err
@@ -343,7 +359,7 @@ func (t *tracingClientOutboundInterceptor) UpdateWithStartWorkflow(
 	ctx, endSpan, err := startOutboundSpan(t.root.tracer, ctx, &TracerStartSpanOptions{
 		Operation: "UpdateWithStartWorkflow",
 		Name:      in.UpdateOptions.UpdateName,
-		Tags:      map[string]string{workflowIDTagKey: in.UpdateOptions.WorkflowID, updateIDTagKey: in.UpdateOptions.UpdateID},
+		Tags:      t.tags(map[string]string{workflowIDTagKey: in.UpdateOptions.WorkflowID, updateIDTagKey: in.UpdateOptions.UpdateID}),
 	}, t.root.headerWriter(t.root.tracer, ctx))
 	if err != nil {
 		return nil, err
@@ -360,7 +376,7 @@ func (t *tracingClientOutboundInterceptor) ExecuteActivity(
 	ctx, endSpan, err := startOutboundSpan(t.root.tracer, ctx, &TracerStartSpanOptions{
 		Operation: "StartActivity",
 		Name:      in.ActivityType,
-		Tags:      map[string]string{activityIDTagKey: in.Options.ID},
+		Tags:      t.tags(map[string]string{activityIDTagKey: in.Options.ID}),
 	}, t.root.headerWriter(t.root.tracer, ctx))
 	if err != nil {
 		return nil, err
@@ -377,7 +393,7 @@ func (t *tracingClientOutboundInterceptor) ExecuteNexusOperation(
 	ctx, endSpan, err := startOutboundSpan(t.root.tracer, ctx, &TracerStartSpanOptions{
 		Operation: "StartNexusOperation",
 		Name:      in.Service + "/" + in.OperationType,
-		Tags:      nexusTags(in.Endpoint, in.Service, in.OperationType),
+		Tags:      t.tags(nexusTags(in.Endpoint, in.Service, in.OperationType)),
 	}, t.root.nexusHeaderWriter(t.root.tracer, in.NexusHeader))
 	if err != nil {
 		return nil, err
@@ -393,7 +409,7 @@ func (t *tracingClientOutboundInterceptor) CancelWorkflow(
 ) (err error) {
 	ctx, endSpan, err := startOutboundSpan(t.root.tracer, ctx, &TracerStartSpanOptions{
 		Operation: "CancelWorkflow",
-		Tags:      workflowExecutionTags(in.WorkflowID, in.RunID),
+		Tags:      t.tags(workflowExecutionTags(in.WorkflowID, in.RunID)),
 	}, nil)
 	if err != nil {
 		return err
@@ -407,7 +423,7 @@ func (t *tracingClientOutboundInterceptor) TerminateWorkflow(
 	ctx context.Context,
 	in *interceptor.ClientTerminateWorkflowInput,
 ) (err error) {
-	tags := workflowExecutionTags(in.WorkflowID, in.RunID)
+	tags := t.tags(workflowExecutionTags(in.WorkflowID, in.RunID))
 	if in.Reason != "" {
 		tags[terminateReasonTagKey] = in.Reason
 	}
@@ -429,7 +445,7 @@ func (t *tracingClientOutboundInterceptor) DescribeWorkflow(
 ) (out *interceptor.ClientDescribeWorkflowOutput, err error) {
 	ctx, endSpan, err := startOutboundSpan(t.root.tracer, ctx, &TracerStartSpanOptions{
 		Operation: "DescribeWorkflow",
-		Tags:      workflowExecutionTags(in.WorkflowID, in.RunID),
+		Tags:      t.tags(workflowExecutionTags(in.WorkflowID, in.RunID)),
 	}, nil)
 	if err != nil {
 		return nil, err
@@ -475,6 +491,7 @@ func (t *tracingActivityInboundInterceptor) ExecuteActivity(
 			workflowIDTagKey: info.WorkflowExecution.ID,
 			runIDTagKey:      info.WorkflowExecution.RunID,
 			activityIDTagKey: info.ActivityID,
+			namespaceTagKey:  info.Namespace,
 		},
 	}, t.root.headerReader(t.root.tracer, ctx))
 	if err != nil {
@@ -877,7 +894,7 @@ func (t *tracingNexusOperationInboundInterceptor) CancelOperation(ctx context.Co
 		Operation:  "RunCancelNexusOperationHandler",
 		Name:       info.Service + "/" + info.Operation,
 		DependedOn: true,
-		Tags:       nexusTags("", info.Service, info.Operation),
+		Tags:       withNamespaceTag(nexusTags("", info.Service, info.Operation), nexusNamespace(ctx)),
 	}, t.root.nexusHeaderReader(t.root.tracer, input.Options.Header))
 	if err != nil {
 		return err
@@ -893,7 +910,7 @@ func (t *tracingNexusOperationInboundInterceptor) StartOperation(ctx context.Con
 		Operation:  "RunStartNexusOperationHandler",
 		Name:       info.Service + "/" + info.Operation,
 		DependedOn: true,
-		Tags:       nexusTags("", info.Service, info.Operation),
+		Tags:       withNamespaceTag(nexusTags("", info.Service, info.Operation), nexusNamespace(ctx)),
 	}, t.root.nexusHeaderReader(t.root.tracer, input.Options.Header))
 	if err != nil {
 		return nil, err
@@ -1002,7 +1019,25 @@ func workflowExecutionTags(workflowID, runID string) map[string]string {
 }
 
 func workflowTags(info *workflow.Info) map[string]string {
-	return workflowExecutionTags(info.WorkflowExecution.ID, info.WorkflowExecution.RunID)
+	return withNamespaceTag(workflowExecutionTags(info.WorkflowExecution.ID, info.WorkflowExecution.RunID), info.Namespace)
+}
+
+func withNamespaceTag(tags map[string]string, namespace string) map[string]string {
+	if namespace == "" {
+		return tags
+	}
+	if tags == nil {
+		tags = make(map[string]string, 1)
+	}
+	tags[namespaceTagKey] = namespace
+	return tags
+}
+
+func nexusNamespace(ctx context.Context) string {
+	if nctx, ok := internal.NexusOperationContextFromGoContext(ctx); ok {
+		return nctx.Namespace
+	}
+	return ""
 }
 
 func workflowTagsWithUpdate(info *workflow.Info, updateID string) map[string]string {

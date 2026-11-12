@@ -2,6 +2,7 @@ package opentelemetry_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -273,6 +274,30 @@ func (s *integrationTestSuite) requireUpdateIDs(spans []sdktrace.ReadOnlySpan) {
 	}
 }
 
+func (s *integrationTestSuite) requireNamespaceTags(spans []sdktrace.ReadOnlySpan) {
+	s.T().Helper()
+	temporalOperations := map[string]bool{}
+	for _, op := range []string{
+		"CancelWorkflow", "ContinueAsNew", "CreateSchedule", "DescribeWorkflow", "HandleQuery", "HandleSignal",
+		"HandleUpdate", "QueryWorkflow", "RunActivity", "RunCancelNexusOperationHandler",
+		"RunStartNexusOperationHandler", "RunWorkflow", "SignalChildWorkflow", "SignalExternalWorkflow",
+		"SignalWithStartWorkflow", "SignalWorkflow", "StartActivity", "StartChildWorkflow", "StartNexusOperation",
+		"StartWorkflow", "StartWorkflowUpdate", "TerminateWorkflow", "UpdateWithStartWorkflow", "ValidateUpdate",
+	} {
+		temporalOperations[op] = true
+	}
+	var checked int
+	for _, span := range spans {
+		operation, _, _ := strings.Cut(span.Name(), ":")
+		if !temporalOperations[operation] {
+			continue
+		}
+		checked++
+		s.Require().Equal("default", s.requireSpanAttribute(span, "temporalNamespace").AsString(), span.Name())
+	}
+	s.Require().NotZero(checked)
+}
+
 func (s *integrationTestSuite) requireContinueAsNewErrorNotRecorded(spans []sdktrace.ReadOnlySpan) {
 	s.T().Helper()
 	runSpan := s.requireSpanNamed(spans, "RunWorkflow:comprehensiveWorkflow")
@@ -409,6 +434,7 @@ func (s *integrationTestSuite) TestComprehensive() {
 		s.Require().Equal(fullTree, s.formatSpanTree(spans))
 		s.requireUniqueSpanIDs(spans)
 		s.requireUpdateIDs(spans)
+		s.requireNamespaceTags(spans)
 		s.requireContinueAsNewErrorNotRecorded(spans)
 		s.requireResultPendingErrorNotRecorded(spans)
 	})

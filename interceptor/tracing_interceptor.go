@@ -21,6 +21,7 @@ const (
 	runIDTagKey      = "temporalRunID"
 	activityIDTagKey = "temporalActivityID"
 	updateIDTagKey   = "temporalUpdateID"
+	namespaceTagKey  = "temporalNamespace"
 )
 
 // Tracer is an interface for tracing implementations as used by
@@ -194,7 +195,13 @@ func NewTracingInterceptor(tracer Tracer) Interceptor {
 }
 
 func (t *tracingInterceptor) InterceptClient(next ClientOutboundInterceptor) ClientOutboundInterceptor {
-	i := &tracingClientOutboundInterceptor{root: t}
+	return t.InterceptClientWithNamespace(next, "")
+}
+
+// InterceptClientWithNamespace is used by the SDK instead of InterceptClient so
+// client spans can be tagged with the client's namespace.
+func (t *tracingInterceptor) InterceptClientWithNamespace(next ClientOutboundInterceptor, namespace string) ClientOutboundInterceptor {
+	i := &tracingClientOutboundInterceptor{root: t, namespace: namespace}
 	i.Next = next
 	return i
 }
@@ -228,7 +235,12 @@ func (t *tracingInterceptor) InterceptNexusOperation(
 
 type tracingClientOutboundInterceptor struct {
 	ClientOutboundInterceptorBase
-	root *tracingInterceptor
+	root      *tracingInterceptor
+	namespace string
+}
+
+func (t *tracingClientOutboundInterceptor) tags(tags map[string]string) map[string]string {
+	return withNamespaceTag(tags, t.namespace)
 }
 
 func (t *tracingClientOutboundInterceptor) CreateSchedule(ctx context.Context, in *ScheduleClientCreateInput) (client.ScheduleHandle, error) {
@@ -236,6 +248,7 @@ func (t *tracingClientOutboundInterceptor) CreateSchedule(ctx context.Context, i
 	span, ctx, err := t.root.startSpanFromContext(ctx, &TracerStartSpanOptions{
 		Operation: "CreateSchedule",
 		Name:      in.Options.ID,
+		Tags:      t.tags(nil),
 		ToHeader:  true,
 		Time:      time.Now(),
 	}, t.root.headerReader(ctx), t.root.headerWriter(ctx))
@@ -258,7 +271,7 @@ func (t *tracingClientOutboundInterceptor) ExecuteWorkflow(
 	span, ctx, err := t.root.startSpanFromContext(ctx, &TracerStartSpanOptions{
 		Operation: "StartWorkflow",
 		Name:      in.WorkflowType,
-		Tags:      map[string]string{workflowIDTagKey: in.Options.ID},
+		Tags:      t.tags(map[string]string{workflowIDTagKey: in.Options.ID}),
 		ToHeader:  true,
 		Time:      time.Now(),
 	}, t.root.headerReader(ctx), t.root.headerWriter(ctx))
@@ -282,7 +295,7 @@ func (t *tracingClientOutboundInterceptor) SignalWorkflow(ctx context.Context, i
 	span, ctx, err := t.root.startSpanFromContext(ctx, &TracerStartSpanOptions{
 		Operation: "SignalWorkflow",
 		Name:      in.SignalName,
-		Tags:      map[string]string{workflowIDTagKey: in.WorkflowID},
+		Tags:      t.tags(map[string]string{workflowIDTagKey: in.WorkflowID}),
 		ToHeader:  true,
 		Time:      time.Now(),
 	}, t.root.headerReader(ctx), t.root.headerWriter(ctx))
@@ -305,7 +318,7 @@ func (t *tracingClientOutboundInterceptor) SignalWithStartWorkflow(
 	span, ctx, err := t.root.startSpanFromContext(ctx, &TracerStartSpanOptions{
 		Operation: "SignalWithStartWorkflow",
 		Name:      in.WorkflowType,
-		Tags:      map[string]string{workflowIDTagKey: in.Options.ID},
+		Tags:      t.tags(map[string]string{workflowIDTagKey: in.Options.ID}),
 		ToHeader:  true,
 	}, t.root.headerReader(ctx), t.root.headerWriter(ctx))
 	if err != nil {
@@ -331,7 +344,7 @@ func (t *tracingClientOutboundInterceptor) QueryWorkflow(
 	span, ctx, err := t.root.startSpanFromContext(ctx, &TracerStartSpanOptions{
 		Operation: "QueryWorkflow",
 		Name:      in.QueryType,
-		Tags:      map[string]string{workflowIDTagKey: in.WorkflowID},
+		Tags:      t.tags(map[string]string{workflowIDTagKey: in.WorkflowID}),
 		ToHeader:  true,
 		Time:      time.Now(),
 	}, t.root.headerReader(ctx), t.root.headerWriter(ctx))
@@ -358,7 +371,7 @@ func (t *tracingClientOutboundInterceptor) UpdateWorkflow(
 	span, ctx, err := t.root.startSpanFromContext(ctx, &TracerStartSpanOptions{
 		Operation: "UpdateWorkflow",
 		Name:      in.UpdateName,
-		Tags:      map[string]string{workflowIDTagKey: in.WorkflowID},
+		Tags:      t.tags(map[string]string{workflowIDTagKey: in.WorkflowID}),
 		ToHeader:  true,
 		Time:      time.Now(),
 	}, t.root.headerReader(ctx), t.root.headerWriter(ctx))
@@ -385,7 +398,7 @@ func (t *tracingClientOutboundInterceptor) UpdateWithStartWorkflow(
 	span, ctx, err := t.root.startSpanFromContext(ctx, &TracerStartSpanOptions{
 		Operation: "UpdateWithStartWorkflow",
 		Name:      in.UpdateOptions.UpdateName,
-		Tags:      map[string]string{workflowIDTagKey: in.UpdateOptions.WorkflowID, updateIDTagKey: in.UpdateOptions.UpdateID},
+		Tags:      t.tags(map[string]string{workflowIDTagKey: in.UpdateOptions.WorkflowID, updateIDTagKey: in.UpdateOptions.UpdateID}),
 		ToHeader:  true,
 		Time:      time.Now(),
 	}, t.root.headerReader(ctx), t.root.headerWriter(ctx))
@@ -407,7 +420,7 @@ func (t *tracingClientOutboundInterceptor) ExecuteActivity(
 	span, ctx, err := t.root.startSpanFromContext(ctx, &TracerStartSpanOptions{
 		Operation: "StartActivity",
 		Name:      in.ActivityType,
-		Tags:      map[string]string{activityIDTagKey: in.Options.ID},
+		Tags:      t.tags(map[string]string{activityIDTagKey: in.Options.ID}),
 		ToHeader:  true,
 		Time:      time.Now(),
 	}, t.root.headerReader(ctx), t.root.headerWriter(ctx))
@@ -457,6 +470,7 @@ func (t *tracingActivityInboundInterceptor) ExecuteActivity(
 		DependedOn: true,
 		Tags: map[string]string{
 			workflowIDTagKey: info.WorkflowExecution.ID,
+			namespaceTagKey:  info.Namespace,
 			runIDTagKey:      info.WorkflowExecution.RunID,
 			activityIDTagKey: info.ActivityID,
 		},
@@ -508,6 +522,7 @@ func (t *tracingWorkflowInboundInterceptor) ExecuteWorkflow(
 		Name:      t.info.WorkflowType.Name,
 		Tags: map[string]string{
 			workflowIDTagKey: t.info.WorkflowExecution.ID,
+			namespaceTagKey:  t.info.Namespace,
 			runIDTagKey:      t.info.WorkflowExecution.RunID,
 		},
 		FromHeader:     true,
@@ -537,6 +552,7 @@ func (t *tracingWorkflowInboundInterceptor) HandleSignal(ctx workflow.Context, i
 		Name:      in.SignalName,
 		Tags: map[string]string{
 			workflowIDTagKey: info.WorkflowExecution.ID,
+			namespaceTagKey:  info.Namespace,
 			runIDTagKey:      info.WorkflowExecution.RunID,
 		},
 		FromHeader:     true,
@@ -568,6 +584,7 @@ func (t *tracingWorkflowInboundInterceptor) HandleQuery(
 		Name:      in.QueryType,
 		Tags: map[string]string{
 			workflowIDTagKey: info.WorkflowExecution.ID,
+			namespaceTagKey:  info.Namespace,
 			runIDTagKey:      info.WorkflowExecution.RunID,
 		},
 		FromHeader: true,
@@ -604,6 +621,7 @@ func (t *tracingWorkflowInboundInterceptor) ValidateUpdate(
 		Name:      in.Name,
 		Tags: map[string]string{
 			workflowIDTagKey: info.WorkflowExecution.ID,
+			namespaceTagKey:  info.Namespace,
 			runIDTagKey:      info.WorkflowExecution.RunID,
 			updateIDTagKey:   currentUpdateInfo.ID,
 		},
@@ -642,6 +660,7 @@ func (t *tracingWorkflowInboundInterceptor) ExecuteUpdate(
 		Name:      in.Name,
 		Tags: map[string]string{
 			workflowIDTagKey: info.WorkflowExecution.ID,
+			namespaceTagKey:  info.Namespace,
 			runIDTagKey:      info.WorkflowExecution.RunID,
 			updateIDTagKey:   currentUpdateInfo.ID,
 		},
@@ -893,6 +912,7 @@ func (t *tracingWorkflowOutboundInterceptor) startNonReplaySpan(
 		DependedOn: dependedOn,
 		Tags: map[string]string{
 			workflowIDTagKey: info.WorkflowExecution.ID,
+			namespaceTagKey:  info.Namespace,
 			runIDTagKey:      info.WorkflowExecution.RunID,
 		},
 		ToHeader: true,
@@ -917,6 +937,7 @@ func (t *tracingNexusOperationInboundInterceptor) CancelOperation(ctx context.Co
 		Operation:  "RunCancelNexusOperationHandler",
 		Name:       info.Service + "/" + info.Operation,
 		DependedOn: true,
+		Tags:       nexusHandlerTags(ctx),
 		FromHeader: true,
 		Time:       time.Now(),
 	}, t.root.nexusHeaderReader(input.Options.Header), t.root.headerWriter(ctx))
@@ -939,6 +960,7 @@ func (t *tracingNexusOperationInboundInterceptor) StartOperation(ctx context.Con
 		Operation:  "RunStartNexusOperationHandler",
 		Name:       info.Service + "/" + info.Operation,
 		DependedOn: true,
+		Tags:       nexusHandlerTags(ctx),
 		FromHeader: true,
 		Time:       time.Now(),
 	}, t.root.nexusHeaderReader(input.Options.Header), t.root.headerWriter(ctx))
@@ -1102,6 +1124,24 @@ func (t *tracingInterceptor) writeSpanToNexusHeader(span TracerSpan, header nexu
 
 func (t *tracingInterceptor) readSpanFromNexusHeader(header nexus.Header) (TracerSpanRef, error) {
 	return t.tracer.UnmarshalSpan(header)
+}
+
+func withNamespaceTag(tags map[string]string, namespace string) map[string]string {
+	if namespace == "" {
+		return tags
+	}
+	if tags == nil {
+		tags = make(map[string]string, 1)
+	}
+	tags[namespaceTagKey] = namespace
+	return tags
+}
+
+func nexusHandlerTags(ctx context.Context) map[string]string {
+	if nctx, ok := internal.NexusOperationContextFromGoContext(ctx); ok {
+		return withNamespaceTag(nil, nctx.Namespace)
+	}
+	return nil
 }
 
 func workflowFutureFromErr(ctx workflow.Context, err error) workflow.Future {

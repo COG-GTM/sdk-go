@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/uber-go/tally/v4"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/baggage"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -4182,6 +4183,18 @@ func (ts *IntegrationTestSuite) testOpenTelemetryTracing(withMessages bool, upda
 	actual := interceptortest.Span("root-span")
 	ts.addOpenTelemetryChildren(rootSpan.SpanContext().SpanID(), actual, ts.openTelemetrySpanRecorder.Ended())
 	ts.Equal(expected, actual)
+
+	var namespaceTagged int
+	for _, s := range ts.openTelemetrySpanRecorder.Ended() {
+		if s.SpanContext().TraceID() != rootSpan.SpanContext().TraceID() || s.SpanContext().SpanID() == rootSpan.SpanContext().SpanID() {
+			continue
+		}
+		idx := slices.IndexFunc(s.Attributes(), func(kv attribute.KeyValue) bool { return kv.Key == "temporalNamespace" })
+		ts.Require().NotEqual(-1, idx, "temporalNamespace attribute missing on %s", s.Name())
+		ts.Equal(ts.config.Namespace, s.Attributes()[idx].Value.AsString(), s.Name())
+		namespaceTagged++
+	}
+	ts.NotZero(namespaceTagged)
 }
 
 func (ts *IntegrationTestSuite) addOpenTelemetryChildren(
