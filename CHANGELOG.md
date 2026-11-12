@@ -22,6 +22,10 @@ to docs, or any other relevant information.
 
 ### Added
 
+- Tracing spans created by `interceptor.NewTracingInterceptor` and `interceptor/tracing.NewTracingInterceptor`
+  (and the OpenTelemetry, OpenTracing and Datadog integrations built on them) now include a `temporalNamespace`
+  tag: the client's namespace on client spans, and the workflow, activity or Nexus operation namespace on worker spans.
+
 ### Changed
 
 ### Deprecated
